@@ -23,7 +23,7 @@ The `cpp` version uses `GraphicsMagick` as the underlying library, and the `cs` 
 
 ## Usage
 ```
-convert-img [input] [output] [options]
+./convert-img [input] [output] [options]
 ```
 - `-i` or `input-ext`: Set the input extension to filter
 - `-o` or `output-ext`: Set the output extension to export
