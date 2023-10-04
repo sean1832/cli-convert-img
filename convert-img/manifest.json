@@ -1,0 +1,12 @@
+{
+    "name": "convert-img",
+    "version": "0.0.1.0",
+    "description": "Image Conversion Tool (Convert, Scale, Resize)",
+    "author": "Zeke Zhang",
+    "license": "MIT",
+    "copyright": "Copyright (C) Zeke Zhang 2023",
+    "repository":{
+        "type": "git",
+        "url": "https://github.com/sean1832/cli-convert-img"
+    }
+}

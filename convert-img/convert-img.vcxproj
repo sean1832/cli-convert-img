@@ -120,6 +120,11 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Message>
+      </Message>
+      <Command>python $(ProjectDir)script\update_ver.py</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -139,13 +144,22 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Message>
+      </Message>
+      <Command>python $(ProjectDir)script\update_ver.py</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\PyControler.cpp" />
     <ClCompile Include="src\convert-img.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="resource.h" />
     <ClInclude Include="src\PyControler.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="convert-img.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
