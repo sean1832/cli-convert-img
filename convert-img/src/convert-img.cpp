@@ -8,7 +8,66 @@
 #include <mutex>
 #include <thread>
 
+#include <queue>
+#include <condition_variable>
+#include <functional>
+
 using namespace std;
+
+
+
+class ThreadPool {
+private:
+    vector<thread> workers;
+    queue<function<void()>> tasks;
+
+    mutex queue_mutex;
+    condition_variable condition;
+    bool stop = false;
+
+public:
+    ThreadPool(size_t threads) : stop(false) {
+        for (size_t i = 0; i < threads; i++) {
+            workers.emplace_back([this] {
+                while (true) {
+                    function<void()> task;
+                    {
+                        unique_lock<mutex> lock(this->queue_mutex);
+                        this->condition.wait(lock, [this] {
+                            return this->stop || !this->tasks.empty();
+                            });
+                        if (this->stop && this->tasks.empty()) return;
+                        task = std::move(this->tasks.front());
+                        this->tasks.pop();
+                    }
+                    task();
+                }
+                });
+        }
+    }
+
+    template<class F>
+    void enqueue(F&& f) {
+        {
+            unique_lock<mutex> lock(queue_mutex);
+            if (stop) throw runtime_error("enqueue on stopped ThreadPool");
+            tasks.emplace(std::forward<F>(f));
+        }
+        condition.notify_one();
+    }
+
+    ~ThreadPool() {
+        {
+            unique_lock<mutex> lock(queue_mutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (thread& worker : workers) {
+            worker.join();
+        }
+    }
+};
+
 
 // Moved repetitive utility functions here to reduce redundancy
 namespace utils {
@@ -100,25 +159,20 @@ void convert_image(
     const int quality, const CompressionType compression,
     const double scale, const bool overwrite)
 {
-    try 
-    {
-        spdlog::info("Converting image: {} -> {}", utils::quote(input_path), utils::quote(output_path));
-        if (!utils::is_file(input_path)) throw invalid_argument("Invalid input file: " + utils::quote(input_path));
+    spdlog::info("Converting image: {} -> {}", utils::quote(input_path), utils::quote(output_path));
+
+    try {
         Magick::Image image(input_path);
         image.scale(Magick::Geometry(image.columns() * scale, image.rows() * scale));
         set_quality(image, quality, utils::get_extension(output_path), compression);
 
-        const string output_path_new = overwrite ? output_path : get_new_path(output_path);
-        if (overwrite && filesystem::exists(output_path)) filesystem::remove(output_path);  // Moved deletion here
-
-        image.write(output_path_new);
+        string output_path_to_use = overwrite ? output_path : get_new_path(output_path);
+        image.write(output_path_to_use);
     }
     catch (Magick::Exception& e) {
         throw runtime_error("Magick++ exception: " + string(e.what()));
     }
 }
-
-std::mutex mtx; // Global mutex for thread-safe logging
 
 void convert_images(
     const string& input_dir, const string& output_dir,
@@ -128,35 +182,19 @@ void convert_images(
 {
     const vector<string> files = utils::get_files(input_dir, input_ext);
 
-    if (files.empty())
-    {
+    if (files.empty()) {
         spdlog::warn("No files found in input directory: {}", utils::quote(input_dir));
         return;
     }
 
-    vector<std::thread> threads; // Store threads
-
-    for (int i = 0; i < files.size();)
-    {
-        // Launch threads up to the specified count or the number of remaining files
-        for (int j = 0; j < thread_count && i < files.size(); ++j, ++i)
-        {
-            threads.emplace_back([&](const string& input_path)
-                {
-	                const filesystem::path input_p(input_path);
-	                const string input_filename = input_p.filename().string();
-                    const string output_path = output_dir + input_filename + "." + output_ext;
-                    convert_image(input_path, output_path, quality, compression, scale, overwrite);
-                }, files[i]);
-        }
-
-        // Join the launched threads before launching the next batch
-        for (auto& th : threads)
-        {
-            if (th.joinable())
-                th.join();
-        }
-        threads.clear();
+    ThreadPool pool(thread_count);
+    for (const auto& input_path : files) {
+        pool.enqueue([&] {
+            const filesystem::path input_p(input_path);
+            const string input_filename = input_p.filename().string();
+            const string output_path = output_dir + input_filename + "." + output_ext;
+            convert_image(input_path, output_path, quality, compression, scale, overwrite);
+            });
     }
 }
 
