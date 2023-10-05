@@ -26,7 +26,7 @@ class Options
     [Range(1, 100)]
     public int Quality { get; set; } = 80;
 
-    [Option('c', "compression", Required = false, HelpText = "Compression algorithm (none, lzw, zip, jpeg, webp)")]
+    [Option('c', "compression", Required = false, HelpText = "Compression methods (lossy, lossless)")]
     public string Compression { get; set; } = null;
 
     [Option('f', "force", Required = false, HelpText = "Force override output file")]
@@ -122,33 +122,41 @@ namespace convert_worker
             void CreateDirNotExist(string path)
             {
                 string dir = Path.GetDirectoryName(path);
-                if (!Directory.Exists(dir))
+                if (!Directory.Exists(dir) && dir != string.Empty)
                 {
                     Directory.CreateDirectory(dir);
                 }
             }
 
-            void SetCompression(MagickImage image, string compressionMethod)
+            void SetCompression(MagickImage image, string compressionMethod, string output)
             {
-                switch (compressionMethod?.ToLower())
+                string output_ext = Path.GetExtension(output);
+                switch (output_ext)
                 {
-                    case "none":
-                        image.SetCompression(CompressionMethod.NoCompression);
+                    case ".png":
+                        image.Settings.SetDefine(MagickFormat.Png, compressionMethod, "true");
                         break;
-                    case "lzw":
-                        image.SetCompression(CompressionMethod.LZW);
+                    case ".tiff":
+                        image.Settings.SetDefine(MagickFormat.Tiff, compressionMethod, "true");
                         break;
-                    case "zip":
-                        image.SetCompression(CompressionMethod.Zip);
+                    case ".tif":
+                        image.Settings.SetDefine(MagickFormat.Tiff, compressionMethod, "true");
                         break;
-                    case "jpeg":
-                        image.SetCompression(CompressionMethod.JPEG);
+                    case ".webp":
+                        image.Settings.SetDefine(MagickFormat.WebP, compressionMethod, "true");
                         break;
-                    case "webp":
-                        image.SetCompression(CompressionMethod.WebP);
+                    case ".heif":
+                        if (compressionMethod == "lossy")
+                        {
+                            image.Settings.SetDefine(MagickFormat.Heif, "compression", "hevc");
+                        }
+                        else if (compressionMethod == "lossless")
+                        {
+                            image.Settings.SetDefine(MagickFormat.Heif, "compression", "av1");
+                        }
                         break;
                     default:
-                        throw new ArgumentException($"Unsupported TIFF compression method: {compressionMethod}");
+                        throw new NotSupportedException($"Compression method {compressionMethod} is not supported for {image.Format}");
                 }
             }
 
@@ -160,7 +168,7 @@ namespace convert_worker
                     image.Resize((int)(image.Width * scale), (int)(image.Height * scale));
                     image.Quality = quality;
                     string outputPath = output;
-                    if (compression != null) SetCompression(image, compression);
+                    if (compression != null) SetCompression(image, compression, outputPath);
                     if (!overrideMode)
                     {
                         outputPath = GetNewFileName(outputPath);
