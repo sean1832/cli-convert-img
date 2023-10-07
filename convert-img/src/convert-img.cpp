@@ -47,44 +47,68 @@ namespace utils {
     }
 }  // namespace utils
 
-enum class CompressionType {  // Changed to enum class for type-safety
-    NoCompression,
-    LZWCompression,
-    ZipCompression,
-    RLECompression,
-    JPEGCompression,
-    Invalid
+enum class CompressionMode {
+    Lossy,
+    Lossless,
+    None
 };
 
-CompressionType get_compression_type(const string& compression)
-{
-    string compression_lower = compression;
-    transform(compression_lower.begin(), compression_lower.end(), compression_lower.begin(), ::tolower);
-
-    if (compression_lower == "none") return CompressionType::NoCompression;
-    if (compression_lower == "lzw") return CompressionType::LZWCompression;
-    if (compression_lower == "deflate") return CompressionType::ZipCompression;
-    if (compression_lower == "packbits") return CompressionType::RLECompression;
-    if (compression_lower == "jpeg") return CompressionType::JPEGCompression;
-    return CompressionType::Invalid;
+CompressionMode get_compression_mode(const string& mode) {
+    if (mode == "lossy") return CompressionMode::Lossy;
+    if (mode == "lossless") return CompressionMode::Lossless;
+    return CompressionMode::None;
 }
 
-void set_quality(Magick::Image& image, const int quality, const string& extension, const CompressionType compression)
-{
-    if (quality < 1 || quality > 100) throw invalid_argument("Invalid quality: " + to_string(quality));
-    if (extension == ".webp" || extension == ".jpeg" || extension == ".jpg" || extension == ".png") 
-    {
-        image.quality(quality);
-        image.compressType(static_cast<Magick::CompressionType>(compression));
+void set_compression(Magick::Image& image, const string& output_ext, const CompressionMode mode) {
+    if (mode == CompressionMode::None) return;
+
+    if (output_ext == ".png") {
+        // Magick++ doesn't have a direct lossy compression for PNG.
+        if (mode == CompressionMode::Lossy)
+        {
+        	spdlog::warn("Lossy compression is not supported for PNG. Using lossless compression instead.");
+		}
+        image.compressType(Magick::LZWCompression);
     }
-    else if (extension == ".tiff" || extension == ".tif") 
+    else if (output_ext == ".jpeg" || output_ext == ".jpg")
     {
-        image.compressType(static_cast<Magick::CompressionType>(compression));
+    	if (mode == CompressionMode::Lossless)
+    	{
+    		spdlog::warn("Lossless compression is not supported for JPEG. Using lossy compression instead.");
+    	}
+    	image.compressType(Magick::JPEGCompression);
     }
-    else 
+    else if (output_ext == ".tiff" || output_ext == ".tif") {
+        if (mode == CompressionMode::Lossy) {
+            image.compressType(Magick::JPEGCompression);
+        }
+        else if (mode == CompressionMode::Lossless) {
+            image.compressType(Magick::LZWCompression);
+        }
+    }
+    else if (output_ext == ".webp") {
+        if (mode == CompressionMode::Lossy) {
+            image.compressType(Magick::JPEGCompression);
+        }
+        else if (mode == CompressionMode::Lossless) {
+            image.compressType(Magick::LZWCompression);
+        }
+    }
+    else if (output_ext == ".heif")
     {
-        image.quality(quality);
+	    if (mode == CompressionMode::Lossy)
+	    {
+	    	image.compressType(Magick::JPEGCompression);
+		}
+        else if (mode == CompressionMode::Lossless)
+        {
+        	image.compressType(Magick::LZWCompression);
+		}
     }
+    else
+    {
+    	spdlog::warn("Compression mode is not supported for {} files. Using LZW compression (default) instead.", output_ext);
+	}
 }
 
 string get_new_path(const string& base_path) {
@@ -100,16 +124,18 @@ string get_new_path(const string& base_path) {
 
 void convert_image(
     const string& input_path, const string& output_path,
-    const int quality, const CompressionType compression,
+    const int quality, const CompressionMode compression_mode,
     const double scale, const bool overwrite)
 {
     spdlog::info("Converting image: {} -> {}", utils::quote(input_path), utils::quote(output_path));
 
-    try 
+    try
     {
         Magick::Image image(input_path);
         image.scale(Magick::Geometry(image.columns() * scale, image.rows() * scale));
-        set_quality(image, quality, utils::get_extension(output_path), compression);
+        image.quality(quality);
+        // Set the compression mode for the image.
+        set_compression(image, utils::get_extension(output_path), compression_mode);
 
         const string output_path_to_use = overwrite ? output_path : get_new_path(output_path);
         image.write(output_path_to_use);
@@ -119,10 +145,11 @@ void convert_image(
     }
 }
 
+
 void convert_images(
     const string& input_dir, const string& output_dir,
     const string& input_ext, const string& output_ext,
-    const CompressionType compression, const int quality,
+    const CompressionMode compression, const int quality,
     const double scale, const bool overwrite, const int thread_count)
 {
     const vector<string> files = utils::get_files(input_dir, input_ext);
@@ -147,11 +174,12 @@ void convert_images(
 int main(int argc, char** argv)
 {
     const auto console = spdlog::stdout_color_mt("console");
+    console->set_pattern("[%^%l%$] %v");
     spdlog::set_default_logger(console);
     Magick::InitializeMagick(nullptr);  // Moved initialization here
 
     CLI::App app{ "Image Conversion Tool (Convert, Scale, Resize)" };
-    string input_path, output_path, input_ext, output_ext, compression = "lzw";
+    string input_path, output_path, input_ext, output_ext, compression_mode;
     int quality = 80;
     double scale = 1.0;
     bool overwrite = false;
@@ -160,7 +188,7 @@ int main(int argc, char** argv)
     app.add_option("input", input_path, "Input image path")->required();
     app.add_option("output", output_path, "Output image path")->required();
     app.add_option("-q,--quality", quality, "Output image quality (1-100)")->check(CLI::Range(1, 100));
-    app.add_option("-c,--compression", compression, "compression methods (none, lzw, deflate, packbits, jpeg)");
+    app.add_option("-c,--compression", compression_mode, "Compression methods (lossy, lossless)");
     app.add_option("-s,--scale", scale, "Output image scale (0.1-1.0)")->check(CLI::Range(0.1, 1.0));
     app.add_option("-i,--in-ext", input_ext, "Input image extension");
     app.add_option("-o,--out-ext", output_ext, "Output image extension");
@@ -179,13 +207,15 @@ int main(int argc, char** argv)
         // add `.` to in extensions if not present
         if (input_ext[0] != '.') input_ext.insert(0, 1, '.');
 
-	    const CompressionType comp_type = get_compression_type(compression);
-        if (comp_type == CompressionType::Invalid) throw invalid_argument("Invalid compression type: " + utils::quote(compression));
+	    const CompressionMode comp_mode = get_compression_mode(compression_mode);
+        if (comp_mode == CompressionMode::None && (output_ext == ".tif" || output_ext == ".tiff")) {
+            spdlog::warn("Please use '-c' or '--compression' to specify different compression methods for .tiff format in order to change image quality.");
+        }
         if (utils::is_file(input_path)) 
         {
             start = std::chrono::high_resolution_clock::now();
-            if (utils::get_extension(output_path) == "tiff" && quality != 95) spdlog::warn("Quality is ignored for tiff files");
-            convert_image(input_path, output_path, quality, comp_type, scale, overwrite);
+            if (utils::get_extension(output_path) == "tiff" && quality != 80) spdlog::warn("Quality is ignored for tiff files");
+            convert_image(input_path, output_path, quality, comp_mode, scale, overwrite);
             end = std::chrono::high_resolution_clock::now();
         }
         else 
@@ -202,22 +232,11 @@ int main(int argc, char** argv)
             // check if output directory exists
             if (!utils::is_directory(output_path))
             {
-                cout << "Directory " + utils::quote(output_path) + " does not exist. Create? (y/n): ";
-                char input;
-                cin >> input;
-                if (input == 'y' || input == 'Y')
-                {
-                    spdlog::info("Creating output directory: {}", output_path);
-                    filesystem::create_directory(output_path);
-                }
-                else
-                {
-	                spdlog::info("Exiting");
-					return 0;
-                }
+                spdlog::info("Creating output directory: {}", output_path);
+                filesystem::create_directory(output_path);
             }
             start = std::chrono::high_resolution_clock::now();
-            convert_images(input_path, output_path, input_ext, output_ext, comp_type, quality, scale, overwrite, num_threads);
+            convert_images(input_path, output_path, input_ext, output_ext, comp_mode, quality, scale, overwrite, num_threads);
             end = std::chrono::high_resolution_clock::now();
         }
 	    const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
