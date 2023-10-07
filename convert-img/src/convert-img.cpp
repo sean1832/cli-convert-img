@@ -124,18 +124,18 @@ string get_new_path(const string& base_path) {
 
 void convert_image(
     const string& input_path, const string& output_path,
-    const int quality, const CompressionMode compression_mode,
+    const int quality, const CompressionMode compression,
     const double scale, const bool overwrite)
 {
     spdlog::info("Converting image: {} -> {}", utils::quote(input_path), utils::quote(output_path));
 
-    try
+    try 
     {
         Magick::Image image(input_path);
         image.scale(Magick::Geometry(image.columns() * scale, image.rows() * scale));
         image.quality(quality);
-        // Set the compression mode for the image.
-        set_compression(image, utils::get_extension(output_path), compression_mode);
+
+    	set_compression(image, utils::get_extension(output_path), compression);
 
         const string output_path_to_use = overwrite ? output_path : get_new_path(output_path);
         image.write(output_path_to_use);
@@ -144,7 +144,6 @@ void convert_image(
         throw runtime_error("Magick++ exception: " + string(e.what()));
     }
 }
-
 
 void convert_images(
     const string& input_dir, const string& output_dir,
@@ -163,7 +162,9 @@ void convert_images(
     for (const auto& input_path : files) {
         pool.enqueue([&] {
             const filesystem::path input_p(input_path);
-            const string input_filename = input_p.filename().string();
+            string input_filename = input_p.filename().string();
+            input_filename = input_filename.substr(0, input_filename.find_last_of('.'));
+
             const string output_path = output_dir + input_filename + "." + output_ext;
             convert_image(input_path, output_path, quality, compression, scale, overwrite);
             });
@@ -214,7 +215,7 @@ int main(int argc, char** argv)
         if (utils::is_file(input_path)) 
         {
             start = std::chrono::high_resolution_clock::now();
-            if (utils::get_extension(output_path) == "tiff" && quality != 80) spdlog::warn("Quality is ignored for tiff files");
+            if (utils::get_extension(output_path) == "tiff" && quality != 95) spdlog::warn("Quality is ignored for tiff files");
             convert_image(input_path, output_path, quality, comp_mode, scale, overwrite);
             end = std::chrono::high_resolution_clock::now();
         }
