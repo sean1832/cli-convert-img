@@ -5,68 +5,12 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <Magick++.h>
 #include <chrono>
-#include <mutex>
 #include <thread>
+#include <future>
 
-#include <queue>
-#include <condition_variable>
-#include <functional>
+#include "ThreadPool.h"
 
 using namespace std;
-
-
-
-class ThreadPool {
-private:
-    vector<thread> workers;
-    queue<function<void()>> tasks;
-
-    mutex queue_mutex;
-    condition_variable condition;
-    bool stop = false;
-
-public:
-    ThreadPool(size_t threads) : stop(false) {
-        for (size_t i = 0; i < threads; i++) {
-            workers.emplace_back([this] {
-                while (true) {
-                    function<void()> task;
-                    {
-                        unique_lock<mutex> lock(this->queue_mutex);
-                        this->condition.wait(lock, [this] {
-                            return this->stop || !this->tasks.empty();
-                            });
-                        if (this->stop && this->tasks.empty()) return;
-                        task = std::move(this->tasks.front());
-                        this->tasks.pop();
-                    }
-                    task();
-                }
-                });
-        }
-    }
-
-    template<class F>
-    void enqueue(F&& f) {
-        {
-            unique_lock<mutex> lock(queue_mutex);
-            if (stop) throw runtime_error("enqueue on stopped ThreadPool");
-            tasks.emplace(std::forward<F>(f));
-        }
-        condition.notify_one();
-    }
-
-    ~ThreadPool() {
-        {
-            unique_lock<mutex> lock(queue_mutex);
-            stop = true;
-        }
-        condition.notify_all();
-        for (thread& worker : workers) {
-            worker.join();
-        }
-    }
-};
 
 
 // Moved repetitive utility functions here to reduce redundancy
@@ -148,7 +92,7 @@ string get_new_path(const string& base_path) {
     int count = 1;
     while (filesystem::exists(new_path))
     {
-        new_path = base_path.substr(0, base_path.find_last_of(".")) + "_" + to_string(count) + base_path.substr(base_path.find_last_of("."));
+        new_path = base_path.substr(0, base_path.find_last_of('.')) + "_" + to_string(count) + base_path.substr(base_path.find_last_of('.'));
         count++;
     }
     return new_path;
@@ -161,12 +105,13 @@ void convert_image(
 {
     spdlog::info("Converting image: {} -> {}", utils::quote(input_path), utils::quote(output_path));
 
-    try {
+    try 
+    {
         Magick::Image image(input_path);
         image.scale(Magick::Geometry(image.columns() * scale, image.rows() * scale));
         set_quality(image, quality, utils::get_extension(output_path), compression);
 
-        string output_path_to_use = overwrite ? output_path : get_new_path(output_path);
+        const string output_path_to_use = overwrite ? output_path : get_new_path(output_path);
         image.write(output_path_to_use);
     }
     catch (Magick::Exception& e) {

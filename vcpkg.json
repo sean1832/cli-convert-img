@@ -2,7 +2,6 @@
     "name": "convert-img",
     "version-string": "0.0.1",
     "dependencies": [
-        "graphicsmagick",
         "cli11",
         "spdlog"
     ]
